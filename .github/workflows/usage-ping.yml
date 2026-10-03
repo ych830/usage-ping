@@ -1,0 +1,76 @@
+# 5시간 사용량 창이 리셋되는 순간에 Haiku 로 "." 을 보내 다음 창을 바로 시작시킨다.
+#
+# 동작:
+#   매시간 실행이 하나 시작되고, 앞 실행이 아직 기다리는 중이면 대기열에서 차례를 기다린다.
+#   차례가 온 실행은 지난 핑이 API 에서 받아 둔 "실제 리셋 시각"까지 잠들었다가 그 초에 핑한다.
+#   그래서 GitHub 스케줄이 늦어져도 핑 시각은 밀리지 않는다.
+#
+# 보안:
+#   - 토큰은 `usage-ping` environment secret. 배포 브랜치를 main 으로 제한해 다른 브랜치·PR 은 못 읽는다.
+#   - 토큰은 마지막 핑 단계에만, 그 안에서도 CLI 프로세스에만 넘어간다. 설치·대기 단계엔 없다.
+#   - GITHUB_TOKEN 은 contents:read 만. 저장소에 아무것도 쓰지 못한다.
+#   - pull_request 계열 트리거 없음. 이 저장소의 main 이 아니면 job 자체가 안 돈다.
+#   - 액션은 커밋 해시로, CLI 는 package-lock.json 의 sha512 로 고정. 설치 스크립트는 실행하지 않는다.
+#   - CLI 는 빈 폴더·빈 HOME·최소 환경변수로 실행: 툴, MCP, 훅, 설정, CLAUDE.md, 텔레메트리 전부 꺼짐.
+name: usage-ping
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "리셋 시각 무시하고 지금 바로 핑"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: usage-ping
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    if: github.repository == 'ych830/usage-ping' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: usage-ping
+    timeout-minutes: 350
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      # 짬통: 지난 실행이 남긴 state/ (ping-log.md, next_reset) 를 불러온다
+      - uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: state
+          key: usage-ping-state-${{ github.run_id }}
+          restore-keys: usage-ping-state-
+
+      - name: Wait for reset
+        id: wait
+        env:
+          FORCE: ${{ inputs.force || 'false' }}
+        run: ./wait.sh
+
+      - name: Install CLI (hash-pinned, no install scripts)
+        if: steps.wait.outputs.skip != 'true'
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Ping
+        id: ping
+        if: steps.wait.outputs.skip != 'true'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: ./ping.sh
+
+      - uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        if: always() && steps.ping.outcome != 'skipped'
+        with:
+          path: state
+          key: usage-ping-state-${{ github.run_id }}

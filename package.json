@@ -1,0 +1,8 @@
+{
+  "name": "usage-ping",
+  "private": true,
+  "description": "5시간 사용량 리셋 시각에 맞춰 Haiku 로 '.' 을 보내는 핑. 의존성은 Claude Code CLI 하나뿐.",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.285"
+  }
+}
