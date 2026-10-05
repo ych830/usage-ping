@@ -15,8 +15,9 @@
 name: usage-ping
 
 on:
-  schedule:
-    - cron: "23 * * * *"
+  # 일시 정지: 토큰 등록 전이라 매번 실패해서 예약 실행을 껐다. 다시 켜려면 아래 두 줄 주석을 푼다.
+  # schedule:
+  #   - cron: "23 * * * *"
   workflow_dispatch:
     inputs:
       force:
